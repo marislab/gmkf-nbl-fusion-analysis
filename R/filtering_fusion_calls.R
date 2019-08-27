@@ -15,8 +15,11 @@ detach("package:plyr", unload=TRUE)
 source('R/format.arriba.R')
 source('R/format.star.R')
 source('R/add.biotypes.R')
+source('R/chrom.plot.R')
+source('R/filter.fusAnnot.R')
 
-# Step 1
+############## Step 1 (format and merge data) ############## 
+
 # load data
 load('data/arriba_merged.RData')
 load('data/star_merged.RData')
@@ -24,56 +27,75 @@ sf <- as.data.frame(star.merge)
 ar <- as.data.frame(arriba.merge)
 rm(star.merge, arriba.merge)
 
+# cols to keep
+cols <- c('GeneA','GeneB','FusionName','Sample','Caller','Fusion_Type','JunctionReadCount','SpanningFragCount','Confidence','GeneA_bp','GeneB_bp','annots')
+
 # star fusion
+# format star fusion output
 sf <- format.star(sf)
-sf.total <- unique(sf[,c('FusionName','Sample','Caller','Fusion_Type','JunctionReadCount','SpanningFragCount','Confidence')])
+sf.total <- unique(sf[,cols])
 
 # arriba fusion
-# format arriba output for intergenic fusions
-ar <- format.arriba(ar)
-ar.total <- unique(ar[,c('FusionName','Sample','Caller','Fusion_Type','JunctionReadCount','SpanningFragCount','Confidence')])
-
-# identify readthrough fusions
-arriba.FusAnnot <- read.delim('results/arriba_fusions_annotated.txt', header = F, stringsAsFactors = F)
-arriba.FusAnnot <- unique(arriba.FusAnnot[grep("readthrough|NEIGHBORS|GTEx_Recurrent", arriba.FusAnnot$V2),'V1'])
-sf.rt <- unique(sf[grep('readthrough|NEIGHBORS|GTEx_Recurrent', sf$annots), 'FusionName'])
-ar.rt <- unique(ar[grep("read-through|non-canonical_splicing", ar$type), 'FusionName'])
-rts <- unique(c(sf.rt, ar.rt, arriba.FusAnnot))
-rts.rev <- unique(unlist(lapply(strsplit(rts, '--'), FUN = function(x) paste0(x[2],'--',x[1]))))
-rts <- unique(c(rts, rts.rev))
-rm(sf.rt, ar.rt, arriba.FusAnnot)
-
-# merge both callers
-all.callers <- rbind(ar.total, sf.total)
-rm(ar, sf, ar.total, sf.total)
+# format arriba output for intergenic fusions + add output of fusion annotator to arriba
+arriba.FusAnnot <- read.delim('results/arriba_fusions_annotated.txt', stringsAsFactors = F)
+ar <- format.arriba(ar, arriba.FusAnnot)
+ar.total <- unique(ar[,cols])
 
 # histology (no sub-histology for NBL)
 load('data/clin_mapped.RData')
 
+# merge both callers (n = 5062)
+all.callers <- rbind(ar.total, sf.total)
+
 # merge callers and clinical information
 all.callers <- merge(all.callers, clin, by.x = "Sample", by.y = "name")
 all.callers <- unique(all.callers)
-colnames(all.callers)[2] <- "Fused_Genes"
+colnames(all.callers)[colnames(all.callers) == "FusionName"] <- "Fused_Genes"
+rm(ar, sf, ar.total, sf.total, arriba.FusAnnot, clin, cols)
+
+############## Step 1 (format and merge data) ############## 
+
+# Plot of unique fusion calls per chromosome per variable
+chrom.plot(fusion.calls = all.callers, filepath = 'results')
+
+############## Step 2 (Apply filters) ############## 
+
+# F1: filter circular RNAs (n = 4846)
+all.callers <- all.callers[which(all.callers$GeneA != all.callers$GeneB),]
+
+# F2: filter Red Herring fusions (n = 4716)
+# keep fusion relevant to cancer biology where confidence is high
+# Using: https://github.com/FusionAnnotator/CTAT_HumanFusionLib/wiki
+red.herrings <- "gtex|bodymap|dgd_paralogs|hgnc_genefam|greger_normal|babiceanu_normal|conjoing|selfie"
+labels.to.keep <- "Mitelman|chimer|cosmic|tcga|klijn|ccle|HaasMedCancer|tumor"
+f1.red.herrings <- filter.fusAnnot(caller = all.callers, red.herrings, labels.to.keep)
+all.callers <- all.callers[-which(all.callers$Fused_Genes %in% f1.red.herrings),]
+
+# Filter F3: Remove Read-through fusions (n = 3609)
+red.herrings <- "readthrough|read-through|neighbors"
+labels.to.keep <- "Mitelman|chimer|cosmic|tcga|klijn|ccle|HaasMedCancer|tumor"
+f2.red.herrings <- filter.fusAnnot(caller = all.callers, red.herrings, labels.to.keep)
+all.callers <- all.callers[-which(all.callers$Fused_Genes %in% f2.red.herrings),]
 
 # Filter F0: remove all non-expressed genes
 # all.callers <- filter.exp(all.callers)
 
-# Filter F1: remove read-throughs (n = 1886)
-all.callers <- all.callers[-which(all.callers$Fused_Genes %in% rts),]
+# Filter F1: remove FusionAnnotator red herrings (n = 2511)
+# all.callers <- all.callers[-which(all.callers$Fused_Genes %in% fusions.to.remove),]
 
 # Filter F2: filter Circular RNAs (n = 1850)
-all.callers <- cbind(all.callers, colsplit(all.callers$Fused_Genes, pattern = '--', names = c("GeneA","GeneB")))
+# all.callers <- cbind(all.callers, colsplit(all.callers$Fused_Genes, pattern = '--', names = c("GeneA","GeneB")))
 # all.callers <- all.callers[!(all.callers$GeneA == all.callers$GeneB & 
 #                         all.callers$Confidence != "high" & 
 #                         all.callers$Fusion_Type != "in-frame"),]
-circ.rna <- all.callers[which(all.callers$GeneA == all.callers$GeneB),]
-write.table(circ.rna, file = 'results/circ_RNA_txt', quote = F, sep = "\t", row.names = F)
-all.callers <- all.callers[which(all.callers$GeneA != all.callers$GeneB),]
+# circ.rna <- all.callers[which(all.callers$GeneA == all.callers$GeneB),]
+# write.table(circ.rna, file = 'results/circ_RNA_txt', quote = F, sep = "\t", row.names = F)
+# all.callers <- all.callers[which(all.callers$GeneA != all.callers$GeneB),]
 
-# Filter F3: reduce duplications (n = 1650)
+# Filter F3: reduce duplications (n = 3596)
 # reduce duplicate fusions to keep one fusion per caller with the highest JunctionReadCount and Confidence
 # assign 3 to high confidence, 2 is medium and 1 is low
-all.callers$Confidence <- ifelse(all.callers$Confidence %in% c("high", "NA"), 3, ifelse(all.callers$Confidence == "medium", 2, 1))
+all.callers$Confidence <- ifelse(all.callers$Confidence %in% "high", 3, ifelse(all.callers$Confidence == "medium", 2, 1))
 all.callers <- all.callers %>%
   group_by_at(vars(-JunctionReadCount, -SpanningFragCount, -Confidence)) %>%
   mutate(max.junc = ifelse(JunctionReadCount == max(JunctionReadCount), 'yes', 'no'),
@@ -84,7 +106,7 @@ all.callers <- all.callers %>%
 
 # Filter F4: annotate gene1 and gene2 with biotype
 # filter any fusion where none of the genes is protein coding
-# (n = 1461)
+# (n = 3386)
 # load('results/fusions_v1.RData')
 annot <- read.delim('data/gencode.v27.primary_assembly.annotation.txt', stringsAsFactors = F)
 annot <- annot %>% group_by(gene_symbol) %>%
@@ -94,15 +116,26 @@ annot <- annot %>% group_by(gene_symbol) %>%
   as.data.frame()
 all.callers <- add.biotypes(df = all.callers, annot = annot)
 
+############## Step 2 (Apply filters) ############## 
+
+############## Step 3 (Create lists) ############## 
+lists.cols <- c('Fused_Genes','Sample','GeneA_bp','GeneB_bp','Fusion_Type','Caller','note')
+
 # List L1: keep all in-frame fusions
-# (n = 125)
+# (n = 174)
 inframe.fus <- all.callers %>% 
   filter(Fusion_Type == "in-frame") %>%
+  group_by(Fused_Genes, Sample, Fusion_Type, GeneA_bp, GeneB_bp) %>%
+  arrange(Caller) %>%
+  summarise(Caller = toString(Caller)) %>%
+  unique() %>%
   as.data.frame()
 inframe.fus$note <- "In-frame fusions"
-tmp <- unique(inframe.fus[,c('Fused_Genes','Sample','Caller','Fusion_Type')])
-write.table(tmp, file = 'results/inframe_fusions_L1.txt', quote = F, sep = "\t", row.names = F)
-  
+inframe.fus <- unique(inframe.fus[,lists.cols])
+nrow(inframe.fus)
+write.table(inframe.fus, file = 'results/inframe_fusions_L1.txt', quote = F, sep = "\t", row.names = F)
+
+
 # List L2: list of fusions to be added irrespective of frame
 # driver fusions from Literature Jo Lynne
 # no driver fusions for Neuroblastoma
@@ -154,51 +187,69 @@ if(exists('lit.genes')) {
 }
 
 # tsgs,onco,tcga fusion genes 
-# (n = 299)
+# (n = 391)
 genes.to.search <- unique(c(tsgs, onco))
 genes.to.search <- c(paste0('^',genes.to.search,'--'), paste0('--',genes.to.search,'$'))
 tsgs_onco <- all.callers[unlist(lapply(genes.to.search, function(x) grep(x, all.callers$Fused_Genes))),]
 fusion <- all.callers[unlist(lapply(fusions.to.search, function(x) grep(x, all.callers$Fused_Genes))),]
-tsgs_onco_fusion <- rbind(tsgs_onco, fusion)
-tsgs_onco_fusion$note <- "Found in onco/tsgs/tcga list"
+tsgs_onco_fusion <- unique(rbind(tsgs_onco, fusion))
 if(exists('lit.genes.add')){
   to.add <- rbind(lit.genes.add, tsgs_onco_fusion)
 } else {
   to.add <- tsgs_onco_fusion
 }
-tmp <- unique(to.add[,c('Fused_Genes','Sample','Caller','Fusion_Type')])
-write.table(tmp, file = 'results/Onco_TSG_TCGA_fusions_L2.txt', quote = F, sep = "\t", row.names = F)
-
-
-# List L3: Found by two callers and Fusion Type is well annotated
-# (n = 52)
-two.callers <- all.callers %>%
-  as.data.frame() %>%
-  filter(Fusion_Type != "other") %>%
-  group_by(Sample, Fused_Genes, Fusion_Type) %>%
+to.add <- to.add %>% 
+  group_by(Fused_Genes, Sample, Fusion_Type, GeneA_bp, GeneB_bp) %>%
+  arrange(Caller) %>%
+  summarise(Caller = toString(Caller)) %>%
   unique() %>%
-  mutate(caller = toString(Caller), caller.count = n()) %>%
+  as.data.frame()
+to.add$note <- "Found in onco/tsgs/tcga list"
+to.add <- unique(to.add[,lists.cols])
+nrow(to.add)
+write.table(to.add, file = 'results/Onco_TSG_TCGA_fusions_L2.txt', quote = F, sep = "\t", row.names = F)
+
+
+# List L3: Found by two callers in the same sample and same breakpoint
+# Fusion Type is well annotated
+# (n = 169)
+two.callers <- all.callers %>%
+  group_by(Sample, Fused_Genes, GeneA_bp, GeneB_bp) %>%
+  unique() %>%
+  arrange(Caller, Fusion_Type) %>%
+  summarise(Caller = toString(Caller), 
+            Fusion_Type = toString(unique(Fusion_Type)),
+            caller.count = n()) %>%
   filter(caller.count >= 2) %>%
   unique() %>%
   as.data.frame()
 two.callers$note <- "All callers"
-tmp <- unique(two.callers[,c('Fused_Genes','Sample','Caller','Fusion_Type')])
-write.table(tmp, file = 'results/BothCallers_fusions_L3.txt', quote = F, sep = "\t", row.names = F)
+two.callers <- unique(two.callers[,lists.cols])
+nrow(two.callers)
+write.table(two.callers, file = 'results/BothCallers_fusions_L3.txt', quote = F, sep = "\t", row.names = F)
+
 
 # List L4: Found in at least 2 samples of the same histology and Fusion Type is well annotated
 # For recurrent fusions, filter out low confidence calls
-# (n = 32)
+# (n = 227)
 rec.fusions <- all.callers %>%
-  as.data.frame() %>%
-  filter(Fusion_Type != "other" & Confidence > 1) %>%
-  group_by(Fused_Genes, Caller, Fusion_Type) %>%
-  mutate(sample.count = n()) %>%
-  filter(sample.count > 1) %>%
+  arrange(Caller, Fusion_Type) %>%
+  group_by(Fused_Genes, GeneA_bp, GeneB_bp) %>%
+  summarise(Caller = toString(unique(Caller)),
+            Fusion_Type = toString(unique(Fusion_Type)),
+            Sample = toString(unique(Sample)),
+            Sample.count = n()) %>%
+  filter(Sample.count > 1) %>%
   unique() %>%
   as.data.frame()
 rec.fusions$note <- "Recurrent fusions"
-tmp <- unique(rec.fusions[,c('Fused_Genes','Sample','Caller','Fusion_Type')])
-write.table(tmp, file = "results/Recurrent_Fusions_L4.txt", quote = F, sep = "\t", row.names = F)
+rec.fusions <- unique(rec.fusions[,lists.cols])
+nrow(rec.fusions)
+rec.fusions <- rec.fusions %>%
+  mutate(Sample = strsplit(as.character(Sample), ",")) %>%
+  unnest(Sample) %>%
+  as.data.frame()
+write.table(rec.fusions, file = "results/Recurrent_Fusions_L4.txt", quote = F, sep = "\t", row.names = F)
 
 # List L5: GeneB or GeneA gene recurrently fused within a histology (>= 5 genes)
 # For recurrently fused genes, filter out low confidence calls
@@ -206,7 +257,7 @@ write.table(tmp, file = "results/Recurrent_Fusions_L4.txt", quote = F, sep = "\t
 # rec <- cbind(all.callers, colsplit(all.callers$Fused_Genes, pattern = '--', names = c("GeneA","GeneB")))
 all.callers$Histology.Broad <- "Neuroblastoma"
 rec <- all.callers
-# (n = 32)
+# (n = 25)
 rec.geneA <- rec %>%
   filter(Confidence > 1) %>%
   group_by(Histology.Broad, Fused_Genes, GeneA, Caller, Fusion_Type) %>%
@@ -216,7 +267,7 @@ rec.geneA <- rec %>%
   summarise(GeneA.ct = n()) %>%
   filter(GeneA.ct >= 3) %>% as.data.frame()
 
-# (n = 8)
+# (n = 6)
 rec.geneB <- rec %>%
   filter(Confidence > 1) %>%
   group_by(Histology.Broad, Fused_Genes, GeneB, Caller, Fusion_Type) %>%
@@ -233,13 +284,13 @@ rec.geneB$note <- "GeneB recurrently fused"
 rec.geneA <- unique(rec.geneA[,colnames(to.add)])
 rec.geneB <- unique(rec.geneB[,colnames(to.add)])
 rec.fused.genes <- unique(rbind(rec.geneA, rec.geneB))
-tmp <- unique(rec.fused.genes[,c('Fused_Genes','Sample','Caller','Fusion_Type')])
-write.table(tmp, file = "results/Recurrently_Fused_Genes_L5.txt", quote = F, sep = "\t", row.names = F)
+rec.fused.genes <- unique(rec.fused.genes[,lists.cols])
+nrow(rec.fused.genes)
+write.table(rec.fused.genes, file = "results/Recurrently_Fused_Genes_L5.txt", quote = F, sep = "\t", row.names = F)
 
-# merge all five lists (n = 520)
+# merge all five lists (n = 2741)
 # collapse by note
-cols <- colnames(inframe.fus)
-total <- unique(rbind(inframe.fus[,cols], to.add[,cols], two.callers[,cols], rec.fusions[,cols], rec.fused.genes[,cols]))
+total <- unique(rbind(inframe.fus, to.add, two.callers, rec.fusions, rec.fused.genes))
 total <- total %>% group_by_at((vars(-note))) %>%
   summarise(note = toString(note)) %>%
   as.data.frame() %>%
