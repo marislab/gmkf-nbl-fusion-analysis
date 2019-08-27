@@ -28,6 +28,7 @@ expr.mat <- expr.mat[,c('gene_symbol','tpm_means','expressed')]
 # only keep fusions where both genes are expressed
 # (n = 628)
 load('results/fusions_v1.RData')
+total <- cbind(total, colsplit(total$Fused_Genes, '--', names = c("GeneA", "GeneB")))
 total <- merge(total, expr.mat, by.x = 'GeneA', by.y = 'gene_symbol')
 colnames(total)[colnames(total) %in% c("tpm_means","expressed")] <- paste0('GeneA_', c("tpm_means","expressed"))
 total <- merge(total, expr.mat, by.x = 'GeneB', by.y = 'gene_symbol')
