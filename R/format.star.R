@@ -15,7 +15,15 @@ format.star <- function(sf){
   sf$Fusion_Type[-which(sf$PROT_FUSION_TYPE %in% c("INFRAME","FRAMESHIFT"))] <- 'other'
   sf$Caller <- 'STARFusion'
   colnames(sf)[1] <- 'FusionName'
-  sf$Confidence <- "NA"
+  sf$Confidence <- "high"
   colnames(sf)[colnames(sf) == "sample_name"] <- "Sample"
+  sf$GeneA_bp <- gsub(":[-+]", "", sf$Gene1_pos)
+  sf$GeneB_bp <- gsub(":[-+]", "", sf$Gene2_pos)
+  
+  # add gene names
+  sf <- cbind(sf, colsplit(sf$FusionName, '--', c("GeneA", "GeneB")))
+  
+  # add unique identifier of fusion + breakpoint
+  
   return(sf)
 }
