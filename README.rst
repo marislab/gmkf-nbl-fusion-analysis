@@ -25,5 +25,5 @@ This repo contains code for:
 Details
 =======
 
-Some snippets are from the PPTC fusion pipeline and some are added from D3B: https://github.com/d3b-center/fusion_filtering_pipeline 
+Some snippets are from the PPTC fusion pipeline (https://github.com/marislab/pptx-pdx-fusion-analysis) and some are added from D3B (https://github.com/d3b-center/fusion_filtering_pipeline)
 
