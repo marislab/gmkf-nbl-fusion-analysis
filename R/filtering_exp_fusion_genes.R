@@ -26,7 +26,7 @@ expr.mat <- expr.mat[,c('gene_symbol','tpm_means','expressed')]
 
 # annotate to fusion file
 # only keep fusions where both genes are expressed
-# (n = 628)
+# (n = 2739)
 load('results/fusions_v1.RData')
 total <- cbind(total, colsplit(total$Fused_Genes, '--', names = c("GeneA", "GeneB")))
 total <- merge(total, expr.mat, by.x = 'GeneA', by.y = 'gene_symbol')
@@ -54,7 +54,7 @@ if(file.exists('data/expr_quantile_change.RData')){
 }
 
 # annotate fusions with relative expression change (Expression outliers)
-# (n = 171)
+# (n = 364)
 total.pc.expr <- total.expr
 total.pc.expr <- merge(total.pc.expr, expr.quantiles, by.x = c("Sample","GeneA"), by.y = c("sample_id","gene_symbol"), all.x = TRUE)
 colnames(total.pc.expr)[colnames(total.pc.expr) == "expression_change"] <- "GeneA_expression_change"

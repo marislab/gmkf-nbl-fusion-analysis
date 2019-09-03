@@ -15,6 +15,7 @@ detach("package:plyr", unload=TRUE)
 source('R/format.arriba.R')
 source('R/format.star.R')
 source('R/add.biotypes.R')
+source('R/merge.cytoband.info.R')
 source('R/chrom.plot.R')
 source('R/filter.fusAnnot.R')
 
@@ -56,7 +57,8 @@ rm(ar, sf, ar.total, sf.total, arriba.FusAnnot, clin, cols)
 ############## Step 1 (format and merge data) ############## 
 
 # Plot of unique fusion calls per chromosome per variable
-chrom.plot(fusion.calls = all.callers, filepath = 'results')
+cytoband <- read.delim('data/cytoBand.txt', stringsAsFactors = F, header = F)
+fusioncalls.cyto <- chrom.plot(fusion.calls = all.callers, filepath = 'results', cytoband = cytoband)
 
 ############## Step 2 (Apply filters) ############## 
 
@@ -66,16 +68,15 @@ all.callers <- all.callers[which(all.callers$GeneA != all.callers$GeneB),]
 # F2: filter Red Herring fusions (n = 4716)
 # keep fusion relevant to cancer biology where confidence is high
 # Using: https://github.com/FusionAnnotator/CTAT_HumanFusionLib/wiki
-red.herrings <- "gtex|bodymap|dgd_paralogs|hgnc_genefam|greger_normal|babiceanu_normal|conjoing|selfie"
-labels.to.keep <- "Mitelman|chimer|cosmic|tcga|klijn|ccle|HaasMedCancer|tumor"
-f1.red.herrings <- filter.fusAnnot(caller = all.callers, red.herrings, labels.to.keep)
+labels.to.keep <- "Mitelman|chimerdb_omim|chimerdb_pubmed|ChimerKB|ChimerPub|ChimerSeq|Cosmic|YOSHIHARA_TCGA|Klijn_CellLines|Larsson_TCGA|CCLE|HaasMedCancer|GUO2018CR_TCGA|TumorFusionsNAR2018|TCGA_StarF2019|CCLE_StarF2019|TCGA|Oncogene|ArcherDX_panel|FoundationOne_panel|OncocartaV1_panel|OncomapV4_panel"
+red.herrings <- "GTEx|GTEx_recurrent|BodyMap|DGD_PARALOGS|HGNC_GENEFAM|Greger_Normal|Babiceanu_Normal|ConjoinG|SELFIE"
+f1.red.herrings <- filter.fusAnnot(caller = all.callers, red.herring = red.herrings, labels.to.keep)
 all.callers <- all.callers[-which(all.callers$Fused_Genes %in% f1.red.herrings),]
 
 # Filter F3: Remove Read-through fusions (n = 3609)
-red.herrings <- "readthrough|read-through|neighbors"
-labels.to.keep <- "Mitelman|chimer|cosmic|tcga|klijn|ccle|HaasMedCancer|tumor"
-f2.red.herrings <- filter.fusAnnot(caller = all.callers, red.herrings, labels.to.keep)
-all.callers <- all.callers[-which(all.callers$Fused_Genes %in% f2.red.herrings),]
+read.throughs <- "NEIGHBORS|NEIGHBORS_OVERLAP"
+read.throughs <- filter.fusAnnot(caller = all.callers, red.herring = read.throughs, labels.to.keep)
+all.callers <- all.callers[-which(all.callers$Fused_Genes %in% read.throughs),]
 
 # Filter F0: remove all non-expressed genes
 # all.callers <- filter.exp(all.callers)
